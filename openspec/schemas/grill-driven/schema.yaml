@@ -1,0 +1,214 @@
+name: grill-driven
+version: 1
+description: >
+  Grill-then-build workflow (grill -> proposal -> specs + design -> tasks ->
+  apply) that delegates its technique to the Matt Pocock skill collection and
+  keeps only the OpenSpec-specific mechanics inline. Install the skills with
+  the setup-matt-pocock-skills skill; without them, each stage still names the
+  method it needs.
+artifacts:
+  - id: grill
+    generates: grill.md
+    description: Interview transcript that resolves ambiguity before any artifact is written
+    template: grill.md
+    instruction: |
+      Run the `grilling` skill to interview the user before writing anything
+      else. Ask ONE question at a time, each with your own recommended answer
+      so they can confirm or correct rather than write an essay, and keep going
+      until no branch of the decision tree is still open. Cover scope
+      boundaries, what's explicitly out of scope, who/what is affected, edge
+      cases, hard constraints, and what "done" looks like.
+
+      Two techniques layer on top of the grill:
+      - Facts, not preferences. If a question has a real answer (does library X
+        support Y, what does the existing code already do), find it yourself -
+        explore the codebase, or use the `research` skill for anything that
+        needs primary sources - instead of asking the user to guess. Record the
+        finding inline and move on.
+      - Vocabulary. If the change introduces new or fuzzy domain terms, use the
+        `domain-modeling` skill to challenge each one and sharpen it into a
+        precise definition. Record it under Vocabulary so proposal, specs,
+        design, and tasks all use the same words.
+
+      Write the resolved outcome to grill.md as a running record organized by
+      topic - the settled answer per question, not the raw back-and-forth. This
+      file is the source of truth the proposal is built from. Do not move on
+      while Open branches is non-empty; that is the signal the grill isn't done.
+    requires: []
+  - id: proposal
+    generates: proposal.md
+    description: Initial proposal document outlining the change
+    template: proposal.md
+    instruction: |
+      Create the proposal that establishes WHY this change is needed, built
+      strictly from the resolved answers in grill.md. Introduce no scope or
+      assumption that wasn't settled during the grill - if something is still
+      ambiguous while writing this, the grill wasn't thorough enough, so go
+      back and ask rather than guessing.
+
+      Sections:
+      - **Why**: 1-2 sentences on the problem or opportunity. Why now?
+      - **What Changes**: specific bullets - new capabilities, modifications,
+        removals. Mark breaking changes **BREAKING**.
+      - **Capabilities**: this is the contract with the specs phase - get it
+        right. Research existing specs before filling it in.
+        - **New Capabilities**: each becomes a new specs/<name>/spec.md. Use
+          kebab-case names (e.g. user-auth, data-export).
+        - **Modified Capabilities**: existing capabilities whose REQUIREMENTS
+          change (not just implementation details). Each needs a delta spec
+          file. Check openspec/specs/ for existing names. Leave empty if no
+          requirement changes.
+      - **Impact**: affected code, APIs, dependencies, systems.
+
+      Keep it to 1-2 pages, focused on the "why" - the "how" belongs in
+      design.md. This is the foundation specs, design, and tasks build on.
+    requires:
+      - grill
+  - id: specs
+    generates: specs/**/*.md
+    description: Detailed specifications for the change
+    template: spec.md
+    instruction: |
+      Create one spec file per capability listed in the proposal's Capabilities
+      section, defining WHAT the system must do.
+      - New capabilities: specs/<capability>/spec.md, using the exact
+        kebab-case name from the proposal.
+      - Modified capabilities: reuse the existing folder name from
+        openspec/specs/<capability>/ for the delta at specs/<capability>/spec.md.
+
+      Delta operations (## headers): ADDED, MODIFIED, REMOVED, RENAMED
+      Requirements.
+      - MODIFIED must contain the FULL updated requirement block, never a
+        fragment. Copy the entire block (from `### Requirement:` through every
+        scenario) from openspec/specs/<capability>/spec.md, paste it under
+        `## MODIFIED Requirements`, and edit; the header text must match the
+        original (whitespace-insensitive). Partial MODIFIED content loses
+        detail at archive time - if you're adding a new concern without
+        changing existing behavior, use ADDED instead.
+      - REMOVED must include **Reason** and **Migration**.
+      - RENAMED uses FROM:/TO: format.
+
+      Format:
+      - `### Requirement: <name>` followed by the requirement text, using
+        SHALL/MUST for normative requirements (avoid should/may).
+      - `#### Scenario: <name>` in WHEN/THEN format. Scenarios MUST use exactly
+        four hashtags - three hashtags or bullets fail silently.
+      - Every requirement has at least one scenario. Each scenario is a
+        testable case the apply phase can turn into a test.
+
+      Example:
+
+      ```
+      ## ADDED Requirements
+
+      ### Requirement: User can export data
+      The system SHALL allow users to export their data in CSV format.
+
+      #### Scenario: Successful export
+      - **WHEN** user clicks "Export" button
+      - **THEN** system downloads a CSV file with all user data
+
+      ## REMOVED Requirements
+
+      ### Requirement: Legacy export
+      **Reason**: Replaced by new export system
+      **Migration**: Use new export endpoint at /api/v2/export
+      ```
+    requires:
+      - proposal
+  - id: design
+    generates: design.md
+    description: Technical design document with implementation details
+    template: design.md
+    instruction: |
+      Create design.md - HOW to implement the change. In this pipeline design
+      is always produced (tasks depend on it), so scale its depth to the
+      change: a small change gets a short design, a cross-cutting one (multiple
+      modules, a new dependency, significant data-model, security, performance,
+      or migration complexity) gets the full treatment. Reference the proposal
+      for motivation and specs for requirements rather than restating them.
+
+      Sections:
+      - **Context**: background, current state, constraints, stakeholders.
+      - **Goals / Non-Goals**: what this achieves and explicitly excludes.
+      - **Decisions**: key technical choices with rationale (why X over Y), each
+        with the alternatives considered.
+      - **Risks / Trade-offs**: format each as [Risk] -> Mitigation.
+      - **Migration Plan**: deploy and rollback steps (if applicable).
+      - **Open Questions**: unknowns still to resolve.
+
+      Skills to use here:
+      - Write Decisions in the deep-module vocabulary from the `codebase-design`
+        skill (module, interface, depth, seam, adapter): favour a small
+        interface hiding a lot of behaviour over a wide one that exposes
+        internals.
+      - When a module's interface shape is the crux of a decision, use the
+        `design-an-interface` skill to design it several radically different
+        ways and compare on depth.
+      - For any open question cheaper to build than to argue about, use the
+        `prototype` skill first - a runnable script for a logic/state question,
+        a couple of toggleable variations for a UX one - and record what it
+        showed instead of arguing the decision in prose.
+    requires:
+      - proposal
+  - id: tasks
+    generates: tasks.md
+    description: Implementation checklist with trackable tasks
+    template: tasks.md
+    instruction: |
+      Break the implementation into a checklist the apply phase tracks against.
+
+      Follow the template exactly - the apply phase parses the checkbox format,
+      so any task not written as `- [ ] X.Y ...` won't be tracked.
+      - Group related tasks under ## numbered headings.
+      - Each task is a checkbox: `- [ ] X.Y Task description`.
+      - Each task is small enough to finish in one session and verifiable - you
+        know when it's done.
+      - Order by dependency. Reference specs for what to build, design for how.
+
+      Example:
+
+      ```
+      ## 1. Setup
+
+      - [ ] 1.1 Create new module structure
+      - [ ] 1.2 Add dependencies to package.json
+
+      ## 2. Core Implementation
+
+      - [ ] 2.1 Implement data export function
+      - [ ] 2.2 Add CSV formatting utilities
+      ```
+
+      For a change big enough that groups don't just run top-to-bottom, state
+      blocking edges explicitly (e.g. "Group 3 blocks on Group 1") so
+      parallelizable work is visible instead of implied by group order alone.
+    requires:
+      - specs
+      - design
+apply:
+  requires:
+    - tasks
+  tracks: tasks.md
+  instruction: |
+    Read the context files, work through pending tasks top to bottom, and mark
+    each `- [ ]` -> `- [x]` as you complete it. Pause on blockers or ambiguity
+    rather than guessing.
+
+    Drive each task test-first with the `tdd` skill: agree the seams to test
+    at, write a failing test, make it pass, keep the slice vertical. Refactoring
+    is not part of the red-green loop - it belongs to the review below.
+
+    When you hit a snag, switch skills instead of grinding:
+    - A bug that resists a quick fix -> the `diagnosing-bugs` skill: build a
+      tight, red-capable feedback loop first, then reproduce, minimise,
+      hypothesise, instrument, fix, and add a regression test.
+    - An in-progress merge/rebase conflict -> the `resolving-merge-conflicts`
+      skill: resolve hunk by hunk, tracing each side's intent; never abort.
+
+    Before marking the change ready to archive, run the `code-review` skill over
+    the diff since the change started (fixed point = the change's base commit).
+    It reviews two axes in parallel and reports them separately: Standards (repo
+    conventions plus the code-smell baseline) and Spec (does the diff faithfully
+    implement proposal.md, specs/, and design.md). Record the findings before
+    moving on.
